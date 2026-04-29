@@ -1,12 +1,6 @@
 /**
- * DETAILS Financials — Supabase API + AI Proxy
- * Netlify function: /.netlify/functions/db
- * 
- * GET  ?action=ping           → health check
- * GET  ?action=load           → load full DB
- * GET  ?action=ai&...         → AI relay
- * POST {action:'save', db:{}} → save full DB snapshot
- * POST {action:'ai', ...}     → AI relay
+ * DETAILS Financials — Supabase API
+ * /.netlify/functions/db
  */
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -19,7 +13,7 @@ const h = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-async function sb(method, path, body, extra = {}) {
+async function sb(method, path, body) {
   const r = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
     method,
     headers: {
@@ -27,19 +21,14 @@ async function sb(method, path, body, extra = {}) {
       'Authorization': 'Bearer ' + SUPABASE_KEY,
       'Content-Type': 'application/json',
       'Prefer': method === 'POST' ? 'resolution=merge-duplicates,return=minimal' : 'return=minimal',
-      ...extra
     },
-    ...(body ? { body: JSON.stringify(body) } : {})
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {})
   });
-  if (!r.ok) {
-    const e = await r.text();
-    throw new Error(path + ' ' + r.status + ': ' + e.slice(0, 150));
-  }
+  if (!r.ok) { const e = await r.text(); throw new Error(path + ' ' + r.status + ': ' + e.slice(0,150)); }
   const t = await r.text();
   return t ? JSON.parse(t) : [];
 }
 
-// Upsert in batches of 50
 async function upsert(table, rows) {
   if (!rows || !rows.length) return;
   for (let i = 0; i < rows.length; i += 50) {
@@ -72,151 +61,155 @@ async function loadDB() {
   coDonors.forEach(r => { (coDon[r.company_id] = coDon[r.company_id] || []).push(r.donor_id); });
 
   const db = {
-    companies: companies.map(c => ({ id: c.id, code: c.code, name: c.name, country: c.country, currency: c.currency, fyStart: c.fy_start })),
-    users: users.map(u => ({ id: u.id, username: u.username, fullName: u.full_name, email: u.email, password: u.password_hash, passwordHash: u.password_hash, role: u.role, isActive: u.is_active, companyAccess: u.company_access, permissions: u.permissions || {} })),
+    companies: companies.map(c => ({ id:c.id, code:c.code, name:c.name, country:c.country, currency:c.currency, fyStart:c.fy_start })),
+    users: users.map(u => ({ id:u.id, username:u.username, fullName:u.full_name, email:u.email, password:u.password_hash, passwordHash:u.password_hash, role:u.role, isActive:u.is_active, companyAccess:u.company_access, permissions:u.permissions||{} })),
     data: {},
     shared: {
-      accounts: accounts.filter(a => a.is_shared).map(mapA),
-      parties: parties.filter(p => p.is_shared).map(mapP),
+      accounts: accounts.filter(a=>a.is_shared).map(mapA),
+      parties: parties.filter(p=>p.is_shared).map(mapP),
     },
     activeCompanyId: companies[0]?.id || null,
   };
 
   companies.forEach(co => {
-    const projIds = coProj[co.id] || projects.map(p => p.id);
-    const donorIds = coDon[co.id] || donors.map(d => d.id);
+    const projIds = coProj[co.id] || projects.map(p=>p.id);
+    const donorIds = coDon[co.id] || donors.map(d=>d.id);
     db.data[co.id] = {
-      accounts: accounts.filter(a => a.company_id === co.id).map(mapA),
-      parties: parties.filter(p => p.company_id === co.id).map(mapP),
-      periods: periods.filter(p => p.company_id === co.id).map(p => ({ id: p.id, name: p.name, from: p.date_from, to: p.date_to, status: p.status, closedAt: p.closed_at })),
-      projects: projects.filter(p => projIds.includes(p.id)).map(p => ({ id: p.id, code: p.code, name: p.name, donorId: p.primary_donor_id, status: p.status, desc: p.description, isCore: p.is_core, budget: { total: parseFloat(p.budget_total) || 0, from: p.budget_from, to: p.budget_to, lines: p.budget_lines || {} } })),
-      donors: donors.filter(d => donorIds.includes(d.id)).map(d => ({ id: d.id, code: d.code, name: d.name, country: d.country, isCore: d.is_core })),
-      transactions: transactions.filter(t => t.company_id === co.id).map(t => ({
-        id: t.id, date: t.date, ref: t.ref, narration: t.narration, voucherType: t.voucher_type,
-        extref: t.ext_ref, projectId: t.project_id, donorId: t.donor_id, partyId: t.party_id,
-        lines: (txLines[t.id] || []).map(l => ({ id: l.id, acct: l.account_id, dr: parseFloat(l.debit) || 0, cr: parseFloat(l.credit) || 0, desc: l.description || '', lineref: l.line_ref || '', projId: l.project_id || '', donorId: l.donor_id || '', partyId: l.party_id || '' })),
-        allocations: (txAllocs[t.id] || []).map(a => ({ projId: a.project_id, pct: parseFloat(a.percentage), isAuto: a.is_auto_core }))
+      accounts: accounts.filter(a=>a.company_id===co.id).map(mapA),
+      parties: parties.filter(p=>p.company_id===co.id).map(mapP),
+      periods: periods.filter(p=>p.company_id===co.id).map(p=>({ id:p.id, name:p.name, from:p.date_from, to:p.date_to, status:p.status, closedAt:p.closed_at })),
+      projects: projects.filter(p=>projIds.includes(p.id)).map(p=>({ id:p.id, code:p.code, name:p.name, donorId:p.primary_donor_id, status:p.status, desc:p.description, isCore:p.is_core, budget:{ total:parseFloat(p.budget_total)||0, from:p.budget_from, to:p.budget_to, lines:p.budget_lines||{} } })),
+      donors: donors.filter(d=>donorIds.includes(d.id)).map(d=>({ id:d.id, code:d.code, name:d.name, country:d.country, isCore:d.is_core })),
+      transactions: transactions.filter(t=>t.company_id===co.id).map(t=>({
+        id:t.id, date:t.date, ref:t.ref, narration:t.narration, voucherType:t.voucher_type,
+        extref:t.ext_ref, projectId:t.project_id, donorId:t.donor_id, partyId:t.party_id,
+        lines:(txLines[t.id]||[]).map(l=>({ id:l.id, acct:l.account_id, dr:parseFloat(l.debit)||0, cr:parseFloat(l.credit)||0, desc:l.description||'', lineref:l.line_ref||'', projId:l.project_id||'', donorId:l.donor_id||'', partyId:l.party_id||'' })),
+        allocations:(txAllocs[t.id]||[]).map(a=>({ projId:a.project_id, pct:parseFloat(a.percentage), isAuto:a.is_auto_core }))
       })),
     };
   });
   return db;
 }
 
-function mapA(a) { return { id: a.id, code: a.code, name: a.name, cls: a.class, cf: a.cf_category, parentId: a.parent_id || undefined, desc: a.description || '' }; }
-function mapP(p) { return { id: p.id, code: p.code, name: p.name, type: p.type, contact: p.contact || '' }; }
+function mapA(a) { return { id:a.id, code:a.code, name:a.name, cls:a.class, cf:a.cf_category, parentId:a.parent_id||undefined, desc:a.description||'' }; }
+function mapP(p) { return { id:p.id, code:p.code, name:p.name, type:p.type, contact:p.contact||'' }; }
 
-// ── SAVE ─────────────────────────────────────────────────────────
+// ── SAVE — smart incremental save ────────────────────────────────
+// Only saves what's in the payload, in parallel
 async function saveDB(db) {
   const ops = [];
 
-  // Upsert companies
+  // Companies
   if (db.companies?.length) {
-    ops.push(upsert('companies', db.companies.map(c => ({ id: c.id, code: c.code, name: c.name, country: c.country, currency: c.currency, fy_start: c.fyStart }))));
+    ops.push(upsert('companies', db.companies.map(c => ({ id:c.id, code:c.code, name:c.name, country:c.country||'Pakistan', currency:c.currency||'USD', fy_start:c.fyStart||'01-01' }))));
   }
 
-  // Upsert users
+  // Users — most important, always save
   if (db.users?.length) {
     ops.push(upsert('users', db.users.map(u => ({
-      id: u.id, username: u.username, full_name: u.fullName || u.username,
-      email: u.email || null, password_hash: u.passwordHash || u.password || '',
-      role: u.role || 'Viewer', is_active: u.isActive !== false,
-      company_access: u.companyAccess || null, permissions: u.permissions || {}
+      id:u.id, username:u.username, full_name:u.fullName||u.username,
+      email:u.email||null, password_hash:u.passwordHash||u.password||'',
+      role:u.role||'Viewer', is_active:u.isActive!==false,
+      company_access:u.companyAccess||null, permissions:u.permissions||{}
     }))));
   }
 
-  // Upsert shared accounts
-  const sharedAccts = db.shared?.accounts || [];
-  if (sharedAccts.length) {
-    ops.push(upsert('accounts', sharedAccts.map(a => ({ id: a.id, company_id: null, code: a.code, name: a.name, class: a.cls || 'EXPENSE', cf_category: a.cf || 'OPERATING', parent_id: a.parentId || null, description: a.desc || null, is_shared: true, is_active: true }))));
-  }
+  // Per-company data
+  for (const [coId, coData] of Object.entries(db.data||{})) {
+    if (!coData) continue;
 
-  // Upsert per-company data
-  for (const [coId, coData] of Object.entries(db.data || {})) {
     // Accounts
-    if (coData.accounts?.length) {
-      ops.push(upsert('accounts', coData.accounts.map(a => ({ id: a.id, company_id: coId, code: a.code, name: a.name, class: a.cls || 'EXPENSE', cf_category: a.cf || 'OPERATING', parent_id: a.parentId || null, description: a.desc || null, is_shared: false, is_active: true }))));
+    const allAccts = [...(coData.accounts||[]), ...(db.shared?.accounts||[])];
+    if (allAccts.length) {
+      ops.push(upsert('accounts', allAccts.map(a => ({
+        id:a.id, company_id: (db.shared?.accounts||[]).find(x=>x.id===a.id) ? null : coId,
+        code:a.code, name:a.name, class:a.cls||'EXPENSE', cf_category:a.cf||'OPERATING',
+        parent_id:a.parentId||null, description:a.desc||null, is_shared:false, is_active:true
+      }))));
     }
+
     // Parties
     if (coData.parties?.length) {
-      ops.push(upsert('parties', coData.parties.map(p => ({ id: p.id, company_id: coId, code: p.code || null, name: p.name, type: p.type || 'Other', contact: p.contact || null, is_shared: false, is_active: true }))));
+      ops.push(upsert('parties', coData.parties.map(p => ({ id:p.id, company_id:coId, code:p.code||null, name:p.name, type:p.type||'Other', contact:p.contact||null, is_shared:false, is_active:true }))));
     }
+
     // Periods
     if (coData.periods?.length) {
-      ops.push(upsert('periods', coData.periods.map(p => ({ id: p.id, company_id: coId, name: p.name, date_from: p.from, date_to: p.to, status: p.status || 'OPEN', closed_at: p.closedAt || null }))));
+      ops.push(upsert('periods', coData.periods.map(p => ({ id:p.id, company_id:coId, name:p.name, date_from:p.from, date_to:p.to, status:p.status||'OPEN', closed_at:p.closedAt||null }))));
     }
-    // Donors
+
+    // Donors + links
     if (coData.donors?.length) {
-      const donorRows = coData.donors.map(d => ({ id: d.id, code: d.code || 'D', name: d.name, country: d.country || null, is_core: d.isCore || false, is_active: true }));
-      ops.push(upsert('donors', donorRows));
-      // Company-donor links
-      const links = coData.donors.map(d => ({ company_id: coId, donor_id: d.id }));
-      ops.push(upsert('company_donors', links));
+      ops.push(upsert('donors', coData.donors.map(d => ({ id:d.id, code:d.code||'D', name:d.name, country:d.country||null, is_core:!!d.isCore, is_active:true }))));
+      ops.push(upsert('company_donors', coData.donors.map(d => ({ company_id:coId, donor_id:d.id }))));
     }
-    // Projects
+
+    // Projects + links
     if (coData.projects?.length) {
-      const projRows = coData.projects.map(p => ({ id: p.id, code: p.code, name: p.name, primary_donor_id: p.donorId || null, status: p.status || 'ACTIVE', description: p.desc || null, budget_total: p.budget?.total || 0, budget_from: p.budget?.from || null, budget_to: p.budget?.to || null, budget_lines: p.budget?.lines || {}, is_core: p.isCore || false, is_active: true }));
-      ops.push(upsert('projects', projRows));
-      const links = coData.projects.map(p => ({ company_id: coId, project_id: p.id }));
-      ops.push(upsert('company_projects', links));
+      ops.push(upsert('projects', coData.projects.map(p => ({ id:p.id, code:p.code, name:p.name, primary_donor_id:p.donorId||null, status:p.status||'ACTIVE', description:p.desc||null, budget_total:p.budget?.total||0, budget_from:p.budget?.from||null, budget_to:p.budget?.to||null, budget_lines:p.budget?.lines||{}, is_core:!!p.isCore, is_active:true }))));
+      ops.push(upsert('company_projects', coData.projects.map(p => ({ company_id:coId, project_id:p.id }))));
     }
-    // Transactions + lines + allocations
+
+    // Transactions + lines — only save, don't delete
     if (coData.transactions?.length) {
-      const txRows = coData.transactions.map(t => ({ id: t.id, company_id: coId, date: t.date, ref: t.ref, narration: t.narration || '', voucher_type: t.voucherType || 'JV', ext_ref: t.extref || null, project_id: t.projectId || null, donor_id: t.donorId || null, party_id: t.partyId || null, is_deleted: false }));
-      ops.push(upsert('transactions', txRows));
-      const lineRows = [], allocRows = [];
+      const txRows = coData.transactions.map(t => ({ id:t.id, company_id:coId, date:t.date, ref:t.ref, narration:t.narration||'', voucher_type:t.voucherType||'JV', ext_ref:t.extref||null, project_id:t.projectId||null, donor_id:t.donorId||null, party_id:t.partyId||null, is_deleted:false }));
+      await upsert('transactions', txRows);
+
+      const lineRows=[], allocRows=[];
       coData.transactions.forEach(t => {
-        (t.lines || []).forEach((l, i) => {
+        (t.lines||[]).forEach((l,i) => {
           if (!l.acct) return;
-          lineRows.push({ id: l.id || (t.id + '_l' + i), transaction_id: t.id, account_id: l.acct, debit: l.dr || 0, credit: l.cr || 0, description: l.desc || null, line_ref: l.lineref || null, project_id: l.projId || null, donor_id: l.donorId || null, party_id: l.partyId || null, sort_order: i });
+          lineRows.push({ id:l.id||(t.id+'_l'+i), transaction_id:t.id, account_id:l.acct, debit:l.dr||0, credit:l.cr||0, description:l.desc||null, line_ref:l.lineref||null, project_id:l.projId||null, donor_id:l.donorId||null, party_id:l.partyId||null, sort_order:i });
         });
-        (t.allocations || []).forEach((a, i) => {
-          if (!a.projId || !a.pct) return;
-          allocRows.push({ id: t.id + '_a' + i, transaction_id: t.id, project_id: a.projId, percentage: a.pct, is_auto_core: a.isAuto || false });
+        (t.allocations||[]).forEach((a,i) => {
+          if (!a.projId||!a.pct) return;
+          allocRows.push({ id:t.id+'_a'+i, transaction_id:t.id, project_id:a.projId, percentage:a.pct, is_auto_core:!!a.isAuto });
         });
       });
-      if (lineRows.length) ops.push(upsert('transaction_lines', lineRows));
-      if (allocRows.length) ops.push(upsert('allocations', allocRows));
+      if (lineRows.length) await upsert('transaction_lines', lineRows);
+      if (allocRows.length) await upsert('allocations', allocRows);
     }
   }
 
+  // Run all non-transaction ops in parallel
   await Promise.all(ops);
-  return { saved: true, timestamp: new Date().toISOString() };
+  return { saved:true, timestamp:new Date().toISOString() };
 }
 
 // ── AI RELAY ─────────────────────────────────────────────────────
 async function aiRelay(body, params) {
   const aiKey = body?.aiKey || params?.aiKey || process.env.ANTHROPIC_API_KEY;
-  const prompt = body?.prompt || decodeURIComponent(params?.prompt || '');
-  const maxTokens = parseInt(body?.maxTokens || params?.maxTokens || '1000');
-  if (!aiKey || !prompt) return { error: 'Missing aiKey or prompt' };
+  const prompt = body?.prompt || decodeURIComponent(params?.prompt||'');
+  const maxTokens = parseInt(body?.maxTokens||params?.maxTokens||'1000');
+  if (!aiKey||!prompt) return { error:'Missing aiKey or prompt' };
   const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'x-api-key': aiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] }),
+    method:'POST',
+    headers:{ 'x-api-key':aiKey, 'anthropic-version':'2023-06-01', 'Content-Type':'application/json' },
+    body: JSON.stringify({ model:'claude-haiku-4-5-20251001', max_tokens:maxTokens, messages:[{role:'user',content:prompt}] }),
   });
   const d = await r.json();
-  if (!r.ok) return { error: 'AI error ' + r.status + ': ' + (d.error?.message || JSON.stringify(d)).slice(0, 200) };
-  return { success: true, text: d.content?.[0]?.text || '' };
+  if (!r.ok) return { error:'AI '+r.status+': '+(d.error?.message||'').slice(0,150) };
+  return { success:true, text:d.content?.[0]?.text||'' };
 }
 
-// ── HANDLER ───────────────────────────────────────────────────────
+// ── HANDLER ──────────────────────────────────────────────────────
 exports.handler = async (event) => {
-  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers: h, body: '' };
-  if (!SUPABASE_URL || !SUPABASE_KEY) return { statusCode: 500, headers: h, body: JSON.stringify({ error: 'SUPABASE_URL or SUPABASE_SERVICE_KEY not set in Netlify env vars' }) };
+  if (event.httpMethod==='OPTIONS') return { statusCode:200, headers:h, body:'' };
+  if (!SUPABASE_URL||!SUPABASE_KEY) return { statusCode:500, headers:h, body:JSON.stringify({error:'SUPABASE_URL or SUPABASE_SERVICE_KEY not set'}) };
 
   try {
-    const params = event.queryStringParameters || {};
-    const body = event.httpMethod === 'POST' ? JSON.parse(event.body || '{}') : {};
-    const action = params.action || body.action || 'load';
+    const params = event.queryStringParameters||{};
+    const body = event.httpMethod==='POST' ? JSON.parse(event.body||'{}') : {};
+    const action = params.action||body.action||'load';
 
-    if (action === 'ping') return { statusCode: 200, headers: h, body: JSON.stringify({ success: true, message: 'DETAILS Supabase API OK', timestamp: new Date().toISOString() }) };
-    if (action === 'load' || action === 'get') { const db = await loadDB(); return { statusCode: 200, headers: h, body: JSON.stringify({ success: true, db, timestamp: new Date().toISOString() }) }; }
-    if (action === 'save') { if (body.db) { const r = await saveDB(body.db); return { statusCode: 200, headers: h, body: JSON.stringify({ success: true, ...r }) }; } }
-    if (action === 'ai') { const r = await aiRelay(body, params); return { statusCode: 200, headers: h, body: JSON.stringify(r) }; }
+    if (action==='ping') return { statusCode:200, headers:h, body:JSON.stringify({success:true, message:'DETAILS Supabase API OK', timestamp:new Date().toISOString()}) };
+    if (action==='load'||action==='get') { const db=await loadDB(); return { statusCode:200, headers:h, body:JSON.stringify({success:true, db, timestamp:new Date().toISOString()}) }; }
+    if (action==='save') { if(body.db){ const r=await saveDB(body.db); return { statusCode:200, headers:h, body:JSON.stringify({success:true,...r}) }; } }
+    if (action==='ai') { const r=await aiRelay(body,params); return { statusCode:200, headers:h, body:JSON.stringify(r) }; }
 
-    return { statusCode: 400, headers: h, body: JSON.stringify({ error: 'Unknown action: ' + action }) };
-  } catch (err) {
-    console.error('db function error:', err.message);
-    return { statusCode: 500, headers: h, body: JSON.stringify({ success: false, error: err.message }) };
+    return { statusCode:400, headers:h, body:JSON.stringify({error:'Unknown action: '+action}) };
+  } catch(err) {
+    console.error('db error:', err.message);
+    return { statusCode:500, headers:h, body:JSON.stringify({success:false, error:err.message}) };
   }
 };
