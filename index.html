@@ -3052,6 +3052,7 @@ async function saveUser(){
     }catch(ex){ console.warn('User sync failed:',ex); }
     hideLoader();
   }
+  // saveDB() above already pushes to Supabase automatically
   closeUserModal(); renderUsers();
 }
 
@@ -3570,6 +3571,14 @@ function exportAuditExcel(){
 function saveDB(){
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(DB)); }catch(e){}
   if(syncConfig.enabled) scheduleSyncToSheets();
+  // Always push to Supabase — fire and forget, non-blocking
+  // This means EVERY save (users, accounts, transactions) auto-syncs
+  fetch('/.netlify/functions/db',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action:'save', db:DB})
+  }).then(r=>{ if(r.ok) setSyncStatus('synced','Saved '+new Date().toLocaleTimeString()); })
+  .catch(()=>{}); // silent fail — offline or not deployed
 }
 function loadDB(){
   const raw = localStorage.getItem(STORAGE_KEY);
@@ -3580,7 +3589,7 @@ function loadDB(){
     companies:[{id:'c1',name:'Research & Development Solutions LLC',code:'RADS',country:'USA',currency:'USD',fyStart:'01-01'}],
     data:{'c1':{accounts:INIT_ACCOUNTS,transactions:INIT_TRANSACTIONS,projects:INIT_PROJECTS,donors:INIT_DONORS,periods:INIT_PERIODS,parties:INIT_PARTIES}},
     users:[{
-      id:'u1',username:'admin',password:'admin123',fullName:'System Administrator',
+      id:'u1',username:'admin',password:'YWRtaW4xMjM=',fullName:'System Administrator',
       email:'',role:'admin',
       companyAccess:['c1'],
       permissions:{canPost:true,canEdit:true,canDelete:true,canViewReports:true,canExport:true,canManageSettings:false},
@@ -3822,7 +3831,7 @@ function migrateDB(){
   }
   if(!DB.adminPin) DB.adminPin='1234';
   if(!DB.users) DB.users=[{
-    id:'u1',username:'admin',password:'admin123',fullName:'System Administrator',
+    id:'u1',username:'admin',password:'YWRtaW4xMjM=',fullName:'System Administrator',
     email:'',role:'admin',companyAccess:null,
     permissions:{canPost:true,canEdit:true,canDelete:true,canViewReports:true,canExport:true,canManageSettings:true},
     active:true,createdAt:new Date().toISOString()
@@ -8253,7 +8262,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   } else {
     // No GAS config — try Supabase directly, fall back to localStorage
     loadDB(); // load local first as fallback
-    setSyncStatus('setup','Not connected');
+    setSyncStatus('supabase','');
     // Try Supabase even without GAS config (Netlify function)
     try{
       showCloudConnecting();
@@ -8593,14 +8602,21 @@ function disconnectSheets(){
   if(!confirm('Disconnect from Google Sheets? Local data will be kept.')) return;
   syncConfig={url:'',apiKey:'',enabled:false};
   saveSyncConfig();
-  setSyncStatus('setup','Not connected');
+  setSyncStatus('supabase','');
   closeSyncModal();
 }
 
 async function forceSyncNow(){
-  if(!syncConfig.enabled){openSyncModal();return;}
-  pendingSync=true;
-  await syncToSheets(true);
+  // Try Supabase first — never show GAS wizard
+  try{
+    setSyncStatus('syncing','Saving…');
+    const r = await Promise.race([
+      fetch('/.netlify/functions/db',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'save',db:DB})}),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),8000))
+    ]);
+    if(r.ok){ setSyncStatus('synced','Saved '+new Date().toLocaleTimeString()); }
+  }catch(e){}
+  if(syncConfig.enabled && syncConfig.url){ pendingSync=true; syncToSheets(true); }
 }
 </script>
 
