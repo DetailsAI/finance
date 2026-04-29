@@ -1,48 +1,85 @@
 /**
- * DETAILS Financials — Google Apps Script Proxy Function
- * Proxies calls to your GAS backend so the GAS URL never appears in browser source.
+ * DETAILS Financials — AI Proxy Function
+ * Runs on Netlify's servers. API key NEVER reaches the browser.
+ * Deploy: this file goes in /netlify/functions/ai-proxy.js
  */
 
 exports.handler = async (event) => {
+  // Only allow POST
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
+  }
+
+  // CORS headers — only allow requests from your own domain
+  const allowedOrigins = [
+    process.env.ALLOWED_ORIGIN || '*',  // Set ALLOWED_ORIGIN in Netlify env vars to your domain
+  ];
+  const origin = event.headers.origin || '';
+  const corsOrigin = allowedOrigins.includes('*') || allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+
   const headers = {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': corsOrigin || '*',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Content-Type': 'application/json',
   };
 
-  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
-
-  const gasUrl = process.env.GAS_URL;
-  if (!gasUrl) {
-    return { statusCode: 500, headers, body: JSON.stringify({ error: 'GAS_URL not configured in Netlify env vars' }) };
+  // Handle preflight
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers, body: '' };
   }
 
   try {
-    let response;
+    const body = JSON.parse(event.body || '{}');
+    const { prompt, maxTokens, model } = body;
 
-    if (event.httpMethod === 'POST') {
-      let bodyObj = JSON.parse(event.body || '{}');
-      // Inject the API key from environment (client doesn't need to send it)
-      if(process.env.GAS_API_KEY) bodyObj.key = process.env.GAS_API_KEY;
-      const body = JSON.stringify(bodyObj);
-      response = await fetch(gasUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: body,
-        redirect: 'follow',
-      });
-    } else {
-      // GET — forward query string
-      const qs = event.rawQuery ? '?' + event.rawQuery : '';
-      response = await fetch(gasUrl + qs, { redirect: 'follow' });
+    if (!prompt) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'No prompt provided' }) };
     }
 
-    const text = await response.text();
-    let data;
-    try { data = JSON.parse(text); } catch { data = { raw: text }; }
+    // API key from Netlify environment — never in browser source
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return { statusCode: 500, headers, body: JSON.stringify({ error: 'AI service not configured. Add ANTHROPIC_API_KEY to Netlify environment variables.' }) };
+    }
 
-    return { statusCode: 200, headers, body: JSON.stringify(data) };
+    // Call Anthropic — server-side, no CORS issues
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: model || 'claude-haiku-4-5-20251001',
+        max_tokens: maxTokens || 1000,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      // 401 = bad key, 429 = rate limit
+      return {
+        statusCode: response.status,
+        headers,
+        body: JSON.stringify({ error: 'AI API error ' + response.status + ': ' + errText.slice(0, 200) }),
+      };
+    }
+
+    const data = await response.json();
+    const text = data.content?.[0]?.text || '';
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({ success: true, text }),
+    };
   } catch (err) {
-    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: 'Proxy error: ' + err.message }),
+    };
   }
 };
