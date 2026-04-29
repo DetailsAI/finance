@@ -3571,14 +3571,15 @@ function exportAuditExcel(){
 function saveDB(){
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(DB)); }catch(e){}
   if(syncConfig.enabled) scheduleSyncToSheets();
-  // Always push to Supabase — fire and forget, non-blocking
-  // This means EVERY save (users, accounts, transactions) auto-syncs
+  // Push to Supabase — fire and forget with timeout, never blocks UI
+  const _sbSaveController = new AbortController();
+  setTimeout(()=>_sbSaveController.abort(), 10000); // 10s max
   fetch('/.netlify/functions/db',{
-    method:'POST',
+    method:'POST', signal:_sbSaveController.signal,
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({action:'save', db:DB})
   }).then(r=>{ if(r.ok) setSyncStatus('synced','Saved '+new Date().toLocaleTimeString()); })
-  .catch(()=>{}); // silent fail — offline or not deployed
+  .catch(()=>{ setSyncStatus('idle',''); }); // never stuck
 }
 function loadDB(){
   const raw = localStorage.getItem(STORAGE_KEY);
