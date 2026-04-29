@@ -8251,9 +8251,32 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     }
     hideCloudConnecting();
   } else {
-    // No cloud config — load from localStorage only
-    loadDB();
+    // No GAS config — try Supabase directly, fall back to localStorage
+    loadDB(); // load local first as fallback
     setSyncStatus('setup','Not connected');
+    // Try Supabase even without GAS config (Netlify function)
+    try{
+      showCloudConnecting();
+      const sbResp = await Promise.race([
+        fetch('/.netlify/functions/db?action=load'),
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),8000))
+      ]);
+      if(sbResp.ok){
+        const sbData = await sbResp.json();
+        if(sbData.success && sbData.db && sbData.db.users && sbData.db.users.length){
+          // Got real users from Supabase — use this data
+          DB = sbData.db;
+          migrateDB();
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(DB));
+          setSyncStatus('synced','Connected to Supabase');
+          console.log('[DETAILS] Loaded from Supabase on startup ✓');
+        }
+      }
+    }catch(e){
+      console.log('[DETAILS] Supabase not available on startup:', e.message);
+    } finally {
+      hideCloudConnecting();
+    }
   }
 
   // ── Login check ────────────────────────────────────────────────
