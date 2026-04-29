@@ -979,7 +979,7 @@ tbody tr.subtotal td{color:#154360!important;font-weight:600;}
       </div>
       <div id="login-error"></div>
       <button class="login-btn" id="login-submit" onclick="doLogin()">Sign In</button>
-      <div class="login-footer">DETAILS Financials &copy; 2025 &nbsp;·&nbsp; Developed by DETAILS</div>
+      <div class="login-footer">DETAILS Financials &copy; 2025 &nbsp;·&nbsp; Developed by Muhammad Umair Savul</div>
     </div>
   </div>
 </div>
@@ -2662,8 +2662,9 @@ function hashPwd(pwd){ // simple base64 obfuscation (not crypto, but better than
   return btoa(unescape(encodeURIComponent(pwd)));
 }
 function checkPwd(plain, stored){
-  // Accept both hashed and legacy plaintext
-  return stored === hashPwd(plain) || stored === plain;
+  // Only accept properly hashed passwords
+  // Legacy plaintext fallback removed — all passwords must be hashed on save
+  return stored === hashPwd(plain);
 }
 
 function isSuperAdmin(){ return currentSession?.role==='admin' && currentSession?.username==='admin'; }
@@ -2741,7 +2742,9 @@ function doLogin(){
       btn.disabled=false; btn.textContent='Sign In';
       return;
     }
-    if(!checkPwd(pwd,foundUser.password)){
+    // Check against both password fields (passwordHash from Supabase migration, password from local)
+    const storedPwd = foundUser.passwordHash || foundUser.password || '';
+    if(!checkPwd(pwd, storedPwd)){
       hideLoader();
       err.textContent='Incorrect password. Please try again.';
       btn.disabled=false; btn.textContent='Sign In';
@@ -3018,11 +3021,15 @@ async function saveUser(){
     const u=DB.users.find(x=>x.id===editingUserId);
     u.fullName=fullName; u.username=username; u.email=email; u.role=role;
     u.companyAccess=companyAccess; u.permissions=permissions;
-    if(pwd) u.password=hashPwd(pwd);
+    if(pwd){
+      const hashed = hashPwd(pwd);
+      u.password = hashed;
+      u.passwordHash = hashed; // keep both fields in sync
+    }
     logAudit('update','User Management','Updated user: '+username+' ('+role+')',{username,role});
   } else {
     DB.users.push({
-      id:'u'+Date.now(), username, password:hashPwd(pwd),
+      id:'u'+Date.now(), username, password:hashPwd(pwd), passwordHash:hashPwd(pwd),
       fullName, email, role, companyAccess, permissions,
       active:true, createdAt:new Date().toISOString()
     });
