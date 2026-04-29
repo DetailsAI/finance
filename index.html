@@ -2662,9 +2662,8 @@ function hashPwd(pwd){ // simple base64 obfuscation (not crypto, but better than
   return btoa(unescape(encodeURIComponent(pwd)));
 }
 function checkPwd(plain, stored){
-  // Only accept properly hashed passwords
-  // Legacy plaintext fallback removed — all passwords must be hashed on save
-  return stored === hashPwd(plain);
+  // Accept hashed OR plaintext (for backward compatibility with existing users)
+  return stored === hashPwd(plain) || stored === plain;
 }
 
 function isSuperAdmin(){ return currentSession?.role==='admin' && currentSession?.username==='admin'; }
@@ -2761,6 +2760,13 @@ function doLogin(){
       companyAccess: user.companyAccess||null,
       permissions: user.permissions||{}
     };
+    // Auto-migrate plaintext password to hashed on successful login
+    if(user.password && user.password === pwd){
+      // Password was stored as plaintext — hash it now
+      user.password = hashPwd(pwd);
+      user.passwordHash = hashPwd(pwd);
+      saveDB();
+    }
     saveSession(session);
     logAudit('system','Auth','User logged in: '+user.username+' ('+user.role+')',{username:user.username});
     hideLoader();
